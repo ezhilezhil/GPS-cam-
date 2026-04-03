@@ -3,87 +3,137 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GPS Custom Camera</title>
+    <title>Pro GPS Cam</title>
     <style>
-        body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; background: #f0f0f0; }
-        video, canvas { width: 100%; max-width: 500px; border-radius: 8px; }
-        .controls { margin: 20px; padding: 15px; background: white; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        select, button { padding: 10px; font-size: 16px; margin: 5px; }
-        #downloadLink { display: none; margin-top: 10px; color: green; font-weight: bold; }
+        :root { --primary: #007bff; --danger: #ff4444; }
+        body { font-family: 'Segoe UI', sans-serif; margin: 0; background: #1a1a1a; color: white; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+        
+        /* Video Container */
+        #camera-container { position: relative; flex-grow: 1; display: flex; align-items: center; justify-content: center; background: #000; }
+        video { width: 100%; height: 100%; object-fit: cover; }
+
+        /* UI Overlays */
+        .status-bar { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.6); padding: 5px 12px; border-radius: 20px; font-size: 12px; border: 1px solid #444; }
+        .gps-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
+        .gps-active { background: #00ff00; box-shadow: 0 0 5px #00ff00; }
+        
+        .controls { background: #222; padding: 20px; border-radius: 20px 20px 0 0; display: flex; flex-direction: column; gap: 15px; align-items: center; }
+        
+        select { width: 100%; padding: 12px; border-radius: 8px; background: #333; color: white; border: 1px solid #444; font-size: 16px; }
+        
+        #capture { 
+            width: 70px; height: 70px; border-radius: 50%; border: 5px solid white; background: var(--danger);
+            cursor: pointer; transition: transform 0.1s; box-shadow: 0 0 15px rgba(0,0,0,0.5);
+        }
+        #capture:active { transform: scale(0.9); }
+
+        #preview-link { color: #4db8ff; text-decoration: none; font-size: 14px; margin-top: 10px; display: none; }
     </style>
 </head>
 <body>
 
-    <h2>GPS Stamp Camera</h2>
+    <div id="camera-container">
+        <div class="status-bar">
+            <span id="gps-dot" class="gps-dot"></span> <span id="gps-text">Waiting for GPS...</span>
+        </div>
+        <video id="video" autoplay playsinline></video>
+    </div>
 
-    <video id="video" autoplay playsinline></video>
-    
     <div class="controls">
-        <label for="tagSelect">Select ID:</label>
         <select id="tagSelect">
-            <option value="FST-1">FST-1</option>
-            <option value="SST-1">SST-1</option>
-            <option value="TST-1">TST-1</option>
+            <option value="FST-1">Site: FST-1</option>
+            <option value="SST-1">Site: SST-1</option>
+            <option value="TST-1">Site: TST-1</option>
         </select>
-        <button id="capture">📸 Take Photo</button>
+        
+        <button id="capture"></button>
+        <a id="preview-link" target="_blank">View Last Photo</a>
     </div>
 
     <canvas id="canvas" style="display:none;"></canvas>
-    
-    <a id="downloadLink">Download Last Photo</a>
 
     <script>
         const video = document.getElementById('video');
         const canvas = document.getElementById('canvas');
-        const captureBtn = document.getElementById('capture');
-        const tagSelect = document.getElementById('tagSelect');
-        const downloadLink = document.getElementById('downloadLink');
+        const gpsText = document.getElementById('gps-text');
+        const gpsDot = document.getElementById('gps-dot');
+        const previewLink = document.getElementById('preview-link');
 
-        let currentCoords = "Locating...";
+        let coords = { lat: "0.0000", lon: "0.0000" };
 
-        // 1. Get Camera Access
-        navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
-            .then(stream => { video.srcObject = stream; })
-            .catch(err => alert("Camera error: " + err));
+        // 1. High-Resolution Camera Access
+        async function startCamera() {
+            const constraints = {
+                video: {
+                    facingMode: "environment",
+                    width: { ideal: 1920 },
+                    height: { ideal: 1080 }
+                }
+            };
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                video.srcObject = stream;
+            } catch (err) {
+                alert("Camera Error: Please allow permissions.");
+            }
+        }
 
-        // 2. Get GPS Location
-        navigator.geolocation.watchPosition(pos => {
-            currentCoords = `Lat: ${pos.coords.latitude.toFixed(4)}, Lon: ${pos.coords.longitude.toFixed(4)}`;
-        }, err => { console.error(err); }, { enableHighAccuracy: true });
+        // 2. Persistent GPS Tracking
+        function startGPS() {
+            if ("geolocation" in navigator) {
+                navigator.geolocation.watchPosition(
+                    (pos) => {
+                        coords.lat = pos.coords.latitude.toFixed(6);
+                        coords.lon = pos.coords.longitude.toFixed(6);
+                        gpsText.innerText = `Lat: ${coords.lat}, Lon: ${coords.lon}`;
+                        gpsDot.classList.add('gps-active');
+                    },
+                    (err) => {
+                        gpsText.innerText = "GPS Error: " + err.message;
+                        gpsDot.classList.remove('gps-active');
+                    },
+                    { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+                );
+            }
+        }
 
-        // 3. Capture and Overlay
-        captureBtn.addEventListener('click', () => {
-            const context = canvas.getContext('2d');
+        // 3. Capture & Stamp
+        document.getElementById('capture').addEventListener('click', () => {
+            const ctx = canvas.getContext('2d');
             
-            // Set canvas size to match video resolution
+            // Match canvas to real video pixels (Fixes blur)
             canvas.width = video.videoWidth;
             canvas.height = video.videoHeight;
+            
+            ctx.drawImage(video, 0, 0);
 
-            // Draw the current video frame
-            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+            // Overlay Background Box (for readability)
+            ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
+            ctx.fillRect(0, canvas.height - 150, 450, 150);
 
-            // Style the text
-            const fontSize = canvas.width / 20;
-            context.font = `bold ${fontSize}px Arial`;
-            context.fillStyle = "yellow";
-            context.shadowColor = "black";
-            context.shadowBlur = 5;
+            // Text Styles
+            ctx.fillStyle = "white";
+            ctx.font = "bold 40px Arial";
+            const siteID = document.getElementById('tagSelect').value;
+            const time = new Date().toLocaleString();
 
-            // Draw Custom Text (Top Left)
-            context.fillText("ID: " + tagSelect.value, 20, fontSize + 20);
+            ctx.fillText(`ID: ${siteID}`, 30, canvas.height - 100);
+            ctx.font = "30px Arial";
+            ctx.fillText(`GPS: ${coords.lat}, ${coords.lon}`, 30, canvas.height - 60);
+            ctx.fillText(time, 30, canvas.height - 25);
 
-            // Draw GPS & Date (Bottom Left)
-            const dateStr = new Date().toLocaleString();
-            context.fillText(currentCoords, 20, canvas.height - (fontSize * 2));
-            context.fillText(dateStr, 20, canvas.height - 20);
-
-            // Create Download Link
-            const dataURL = canvas.toDataURL('image/jpeg');
-            downloadLink.href = dataURL;
-            downloadLink.download = `${tagSelect.value}_${Date.now()}.jpg`;
-            downloadLink.style.display = "block";
-            downloadLink.innerText = "Click here to save photo";
+            // Export
+            const imgData = canvas.toDataURL('image/jpeg', 0.9);
+            previewLink.href = imgData;
+            previewLink.download = `${siteID}_Photo.jpg`;
+            previewLink.style.display = "block";
+            
+            // Optional: Auto-click download
+            previewLink.click();
         });
+
+        startCamera();
+        startGPS();
     </script>
 </body>
 </html>
