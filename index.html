@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GPS Custom Camera</title>
+    <style>
+        body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; background: #f0f0f0; }
+        video, canvas { width: 100%; max-width: 500px; border-radius: 8px; }
+        .controls { margin: 20px; padding: 15px; background: white; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        select, button { padding: 10px; font-size: 16px; margin: 5px; }
+        #downloadLink { display: none; margin-top: 10px; color: green; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <h2>GPS Stamp Camera</h2>
+
+    <video id="video" autoplay playsinline></video>
+    
+    <div class="controls">
+        <label for="tagSelect">Select ID:</label>
+        <select id="tagSelect">
+            <option value="FST-1">FST-1</option>
+            <option value="SST-1">SST-1</option>
+            <option value="TST-1">TST-1</option>
+        </select>
+        <button id="capture">📸 Take Photo</button>
+    </div>
+
+    <canvas id="canvas" style="display:none;"></canvas>
+    
+    <a id="downloadLink">Download Last Photo</a>
+
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const captureBtn = document.getElementById('capture');
+        const tagSelect = document.getElementById('tagSelect');
+        const downloadLink = document.getElementById('downloadLink');
+
+        let currentCoords = "Locating...";
+
+        // 1. Get Camera Access
+        navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+            .then(stream => { video.srcObject = stream; })
+            .catch(err => alert("Camera error: " + err));
+
+        // 2. Get GPS Location
+        navigator.geolocation.watchPosition(pos => {
+            currentCoords = `Lat: ${pos.coords.latitude.toFixed(4)}, Lon: ${pos.coords.longitude.toFixed(4)}`;
+        }, err => { console.error(err); }, { enableHighAccuracy: true });
+
+        // 3. Capture and Overlay
+        captureBtn.addEventListener('click', () => {
+            const context = canvas.getContext('2d');
+            
+            // Set canvas size to match video resolution
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+
+            // Draw the current video frame
+            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+            // Style the text
+            const fontSize = canvas.width / 20;
+            context.font = `bold ${fontSize}px Arial`;
+            context.fillStyle = "yellow";
+            context.shadowColor = "black";
+            context.shadowBlur = 5;
+
+            // Draw Custom Text (Top Left)
+            context.fillText("ID: " + tagSelect.value, 20, fontSize + 20);
+
+            // Draw GPS & Date (Bottom Left)
+            const dateStr = new Date().toLocaleString();
+            context.fillText(currentCoords, 20, canvas.height - (fontSize * 2));
+            context.fillText(dateStr, 20, canvas.height - 20);
+
+            // Create Download Link
+            const dataURL = canvas.toDataURL('image/jpeg');
+            downloadLink.href = dataURL;
+            downloadLink.download = `${tagSelect.value}_${Date.now()}.jpg`;
+            downloadLink.style.display = "block";
+            downloadLink.innerText = "Click here to save photo";
+        });
+    </script>
+</body>
+</html>
